@@ -15,42 +15,66 @@ if (isset($_SESSION["user_id"])) {
 
 $name = $email = $password = "";
 $nameErr = $emailErr = $passwordErr = "";
-$success = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    // Validate name
     if (empty($_POST["name"])) {
         $nameErr = "Name is required!";
     } else {
         $name = $_POST["name"];
     }
 
+    // Validate email
     if (empty($_POST["email"])) {
         $emailErr = "Email is required!";
     } else {
         $email = $_POST["email"];
+        // Validate email format (general validation, no .com requirement)
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $emailErr = "Please enter a valid email address!";
+        }
     }
 
+    // Validate password
     if (empty($_POST["password"])) {
         $passwordErr = "Password is required!";
     } else {
         $password = $_POST["password"];
     }
 
-    if ($name && $email && $password) {
-        $check_email = mysqli_query($connections, "SELECT * FROM users WHERE email = '$email'");
-        if (mysqli_num_rows($check_email) > 0) {
+    // Proceed with registration if all validations pass
+    if ($name && $email && $password && empty($emailErr)) {
+        // Check for duplicate email using a prepared statement to prevent SQL injection
+        $check_email_query = "SELECT * FROM users WHERE email = ?";
+        $check_email_stmt = $connections->prepare($check_email_query);
+        $check_email_stmt->bind_param("s", $email);
+        $check_email_stmt->execute();
+        $check_email_result = $check_email_stmt->get_result();
+        if ($check_email_result->num_rows > 0) {
             $emailErr = "Email is already registered!";
         } else {
+            // Insert the user with the plain-text password (not recommended)
             $query = "INSERT INTO users (name, email, password, account_type) VALUES (?, ?, ?, '2')";
             $stmt = $connections->prepare($query);
             $stmt->bind_param("sss", $name, $email, $password);
             if ($stmt->execute()) {
-                $success = "Registration successful! You can now <a href='index.php'>login</a>.";
+                // Get the newly created user's ID
+                $user_id = $stmt->insert_id;
+                
+                // Set session variables to log the user in
+                $_SESSION["user_id"] = $user_id;
+                $_SESSION["account_type"] = "2"; // User account type
+                $_SESSION["name"] = $name; // Set the name in the session
+                
+                // Redirect to shop.php
+                header("Location: shop.php");
+                exit();
             } else {
                 $emailErr = "Error registering user.";
             }
             $stmt->close();
         }
+        $check_email_stmt->close();
     }
 }
 ?>
@@ -188,9 +212,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         </a>
         <br>
         <h2>Register</h2>
-        <?php if ($success) { ?>
-            <div class="success"><?php echo $success; ?></div>
-        <?php } ?>
         <form method="POST" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>">
             <div class="form-group">
                 <label for="name">Name</label>
@@ -204,7 +225,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             </div>
             <div class="form-group">
                 <label for="password">Password</label>
-                <input type="text" id="password" name="password" required>
+                <input type="password" id="password" name="password" required>
                 <span class="error"><?php echo $passwordErr; ?></span>
             </div>
             <button type="submit">Register</button>
